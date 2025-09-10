@@ -1,0 +1,18 @@
+{
+    "name": "supseven/theme-dev",
+    "description": "Development helpers for development.",
+    "type": "typo3-cms-extension",
+    "require": {
+        "typo3/cms-core": "^12.4 || ^13.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Supseven\\ThemeDev\\": "Classes/"
+        }
+    },
+    "extra": {
+        "typo3/cms": {
+            "extension-key": "theme_dev"
+        }
+    }
+}
