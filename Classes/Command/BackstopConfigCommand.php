@@ -39,7 +39,7 @@ class BackstopConfigCommand extends Command
         $this->addArgument('targetFile', InputArgument::OPTIONAL, 'File to save the config in. Must already exist.', 'tests/backstop/backstop.json');
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $targetFile = $input->getArgument('targetFile');
