@@ -92,11 +92,14 @@ class BackendUserCommand extends Command
         $uc = $existing['uc'] ?? null;
 
         if ($uc) {
-            $uc = unserialize($uc);
-        } else {
+            $uc = @unserialize($uc);
+        }
+
+        if (!is_array($uc)) {
             $uc = [];
         }
 
+        $uc['mfa'] ??= [];
         $uc['mfa']['defaultProvider'] = 'totp';
 
         $recoveryCodes = (new RecoveryCodes('BE'))->generateRecoveryCodes();
@@ -110,7 +113,7 @@ class BackendUserCommand extends Command
                 'created' => time(),
                 'updated' => time(),
             ],
-            'recoveryCodes' => [
+            'recovery-codes' => [
                 'codes'   => array_values($recoveryCodes),
                 'active'  => true,
                 'created' => time(),
