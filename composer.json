@@ -3,7 +3,9 @@
     "description": "Development helpers for development.",
     "type": "typo3-cms-extension",
     "require": {
-        "typo3/cms-core": "^12.4 || ^13.4"
+        "ext-intl": "*",
+        "ext-simplexml": "*",
+        "typo3/cms-core": "^12.4 || ^13.4 || ^14.1"
     },
     "autoload": {
         "psr-4": {
