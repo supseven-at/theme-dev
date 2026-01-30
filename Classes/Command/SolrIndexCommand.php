@@ -44,6 +44,7 @@ class SolrIndexCommand extends Command
     {
         $this->addOption('site', 's', InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Limit to given sites (TYPO3 site identifier)');
         $this->addOption('type', 't', InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Limit to given types (=index configuration name, not table)');
+        $this->addOption('ignore-errors', 'i', InputOption::VALUE_NONE, 'Continue after an indexing error');
         $this->addOption('field', 'f', InputOption::VALUE_REQUIRED, 'solr field that saves the type info', 'type_stringS');
 
         $this->setHelp(
@@ -250,6 +251,8 @@ class SolrIndexCommand extends Command
         $progressBar->start();
         $hosts = [];
 
+        $ignoreErrors = (bool)$input->getOption('ignore-errors');
+
         foreach ($itemRows as $itemRow) {
             try {
                 $item = GeneralUtility::makeInstance(Item::class, $itemRow);
@@ -334,7 +337,13 @@ class SolrIndexCommand extends Command
                     implode(PHP_EOL, $lines),
                 ]);
 
-                return self::FAILURE;
+                if (!$ignoreErrors) {
+                    return self::FAILURE;
+                }
+
+                $io->newLine();
+                $progressBar->display();
+                $progressBar->advance();
             }
         }
 

@@ -28,7 +28,6 @@ class BackstopConfigCommand extends Command
         protected readonly RequestFactory $requestFactory,
     ) {
         parent::__construct();
-
     }
 
     protected function configure(): void
