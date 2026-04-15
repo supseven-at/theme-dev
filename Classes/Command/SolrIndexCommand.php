@@ -8,6 +8,7 @@ use ApacheSolrForTypo3\Solr\ConnectionManager;
 use ApacheSolrForTypo3\Solr\Domain\Index\Queue\QueueInitializationService;
 use ApacheSolrForTypo3\Solr\Domain\Site\SiteRepository;
 use ApacheSolrForTypo3\Solr\IndexQueue\Indexer;
+use ApacheSolrForTypo3\Solr\IndexQueue\IndexingService;
 use ApacheSolrForTypo3\Solr\IndexQueue\Item;
 use ApacheSolrForTypo3\Solr\System\Logging\SolrLogManager;
 use Psr\Log\LoggerInterface;
@@ -79,14 +80,19 @@ class SolrIndexCommand extends Command
         }
 
         $log = new ConsoleLogger($output);
+        $solrLogger = new class ($log) extends SolrLogManager implements SingletonInterface {
+            public string $prefix = '';
 
-        GeneralUtility::setSingletonInstance(SolrLogManager::class, new class ($log) extends SolrLogManager implements SingletonInterface {
             public function __construct(protected ConsoleLogger $consoleLogger)
             {
             }
 
             public function log($level, \Stringable|string $message, array $context = []): void
             {
+                if ($this->prefix) {
+                    $message = $this->prefix . ': ' . $message;
+                }
+
                 $this->consoleLogger->log($level, $message, $context);
             }
 
@@ -106,7 +112,9 @@ class SolrIndexCommand extends Command
                     }
                 };
             }
-        });
+        };
+
+        GeneralUtility::setSingletonInstance(SolrLogManager::class, $solrLogger);
 
         $siteRepository = GeneralUtility::makeInstance(SiteRepository::class);
         $allSites = $siteRepository->getAvailableSites(true);
@@ -249,70 +257,38 @@ class SolrIndexCommand extends Command
         }
 
         $progressBar->start();
-        $hosts = [];
 
-        $ignoreErrors = (bool)$input->getOption('ignore-errors');
+        $ignoreErrors = $input->hasOption('ignore-errors') && $input->getOption('ignore-errors');
+        /** @var IndexingService $indexService */
+        $indexService = GeneralUtility::makeInstance(IndexingService::class);
 
         foreach ($itemRows as $itemRow) {
-            try {
-                $item = GeneralUtility::makeInstance(Item::class, $itemRow);
-                $config = $item->getSite()->getSolrConfiguration();
+            $item = GeneralUtility::makeInstance(Item::class, $itemRow);
+            $solrLogger->prefix = $item->getSite()->getTypo3SiteObject()->getIdentifier() .
+                ':' . $item->getIndexingConfigurationName() .
+                ':' . $item->getRecordUid();
 
+            $indexQueueClass = $item->getSite()->getSolrConfiguration()->getIndexQueueClassByConfigurationName($item->getIndexingConfigurationName());
+            $indexQueue = GeneralUtility::makeInstance($indexQueueClass);
+
+            try {
                 $log->debug('Start indexing item {site}:{type}:{uid}', [
                     'site' => $item->getSite()->getTypo3SiteObject()->getIdentifier(),
                     'type' => $item->getIndexingConfigurationName(),
                     'uid'  => $item->getRecordUid(),
                 ]);
 
-                $indexerClass = $config->getIndexQueueIndexerByConfigurationName($item->getIndexingConfigurationName());
-                $indexerConfiguration = $config->getIndexQueueIndexerConfigurationByConfigurationName($item->getIndexingConfigurationName());
-
-                $indexer = GeneralUtility::makeInstance($indexerClass, $indexerConfiguration);
-
-                if (!$indexer instanceof Indexer) {
-                    throw new \ErrorException(sprintf('Indexer %s of type %s is not a valid indexer. Must be a subclass of %s', $indexerClass, $item->getIndexingConfigurationName(), Indexer::class));
-                }
-
-                // Remember original http host value
-                $originalHttpHost = $_SERVER['HTTP_HOST'] ?? null;
-
-                $itemChangedDate = $item->getChanged();
-                $itemChangedDateAfterIndex = 0;
-
-                $rootPageId = $item->getRootPageUid();
-                $hostFound = !empty($hosts[$rootPageId]);
-
-                if (!$hostFound) {
-                    $hosts[$rootPageId] = $item->getSite()->getDomain();
-                }
-
-                $_SERVER['HTTP_HOST'] = $hosts[$rootPageId];
-
-                // needed since TYPO3 7.5
-                GeneralUtility::flushInternalRuntimeCaches();
-
-                $itemIndexed = $indexer->index($item);
-                $indexQueueClass = $item->getSite()->getSolrConfiguration()->getIndexQueueClassByConfigurationName($item->getIndexingConfigurationName());
-                $indexQueue = GeneralUtility::makeInstance($indexQueueClass);
+                $itemIndexed = $indexService->indexItems([$item]);
 
                 // update IQ item so that the IQ can determine what's been indexed already
                 if ($itemIndexed) {
                     $indexQueue->updateIndexTimeByItem($item);
                     $itemChangedDateAfterIndex = $item->getChanged();
-                }
 
-                if ($itemChangedDateAfterIndex > $itemChangedDate && $itemChangedDateAfterIndex > time()) {
-                    $indexQueue->setForcedChangeTimeByItem($item, $itemChangedDateAfterIndex);
+                    if ($itemChangedDateAfterIndex > $item->getChanged() && $itemChangedDateAfterIndex > time()) {
+                        $indexQueue->setForcedChangeTimeByItem($item, $itemChangedDateAfterIndex);
+                    }
                 }
-
-                if (!is_null($originalHttpHost)) {
-                    $_SERVER['HTTP_HOST'] = $originalHttpHost;
-                } else {
-                    unset($_SERVER['HTTP_HOST']);
-                }
-
-                // needed since TYPO3 7.5
-                GeneralUtility::flushInternalRuntimeCaches();
 
                 $progressBar->advance();
             } catch (\Throwable $e) {
@@ -332,10 +308,12 @@ class SolrIndexCommand extends Command
                 }
 
                 $io->error([
-                    'Error when indexing ' . $item->getSite()->getTypo3SiteObject()->getIdentifier() . ':' . $item->getIndexingConfigurationName() . ':' . $item->getRecordUid(),
+                    'Error when indexing ' . $solrLogger->prefix,
                     $e->getMessage(),
                     implode(PHP_EOL, $lines),
                 ]);
+
+                $indexQueue->markItemAsFailed($item, $e->getCode() . ': ' . $e->__toString());
 
                 if (!$ignoreErrors) {
                     return self::FAILURE;
@@ -345,6 +323,8 @@ class SolrIndexCommand extends Command
                 $progressBar->display();
                 $progressBar->advance();
             }
+
+            $solrLogger->prefix = '';
         }
 
         $progressBar->clear();

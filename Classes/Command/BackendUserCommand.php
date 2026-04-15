@@ -66,10 +66,20 @@ class BackendUserCommand extends Command
             return self::INVALID;
         }
 
-        $translit = \Transliterator::create('Any-Latin; Latin-ASCII; Lower()');
+        $translitRules = ':: De-ASCII;' .
+            ':: Any-Latin;' .
+            ':: [:Nonspacing Mark:] Remove;' .
+            ':: [:Punctuation:] Remove;' .
+            ':: [:Symbol:] Remove;' .
+            ':: Lower();' .
+            '\' \' {\' \'} > ;' .
+            '::NULL;' .
+            '[:Separator:] > \'-\'';
+        $transliterator = \Transliterator::createFromRules($translitRules);
 
-        $key = ucfirst(strtolower(substr($firstname, 0, 2))) . strtoupper(substr($lastname, 0, 1));
-        $username = 'admin-sup7-' . strtolower($key);
+        $firstnameKey = $transliterator->transliterate($firstname);
+        $lastnameKey = $transliterator->transliterate($lastname);
+        $username = 'admin-sup7-' . substr($firstnameKey, 0, 2) . substr($lastnameKey, 0, 1);
 
         $hasher = $this->passwordHashFactory->getDefaultHashInstance('BE');
         $passwordChars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.-_:;öä#+üßÖÄ*Ü?!§$%&/()=}][{';
@@ -102,7 +112,7 @@ class BackendUserCommand extends Command
         $uc['mfa'] ??= [];
         $uc['mfa']['defaultProvider'] = 'totp';
 
-        $recoveryCodes = (new RecoveryCodes('BE'))->generateRecoveryCodes();
+        $recoveryCodes = new RecoveryCodes('BE')->generateRecoveryCodes();
 
         $totpToken = Totp::generateEncodedSecret([$uid ?? '', $username]);
         $mfa = json_encode([
@@ -123,7 +133,7 @@ class BackendUserCommand extends Command
 
         $record = [
             'username' => $username,
-            'email'    => substr($translit->transliterate($firstname), 0, 1) . '.' . $translit->transliterate($lastname) . '@supseven.at',
+            'email'    => substr($firstnameKey, 0, 1) . '.' . $lastnameKey . '@supseven.at',
             'realName' => $firstname . ' ' . $lastname,
             'password' => $hasher->getHashedPassword($password),
             'tstamp'   => time(),
